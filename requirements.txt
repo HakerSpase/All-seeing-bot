@@ -1,0 +1,4 @@
+pydantic
+aiogram
+pytz
+supabase==2.10.0
