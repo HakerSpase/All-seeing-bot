@@ -2,7 +2,7 @@
 
 EDITED_MESSAGE_FORMAT = (
     '<b>ИЗМЕНЕНО</b>\n'
-    '<a href="tg://user?id={user_id}">{user_fullname_escaped}</a> | {timestamp}\n\n'
+    '<a href="{user_link}">{user_fullname_escaped}</a> | {timestamp}\n\n'
     '<b>Было:</b>\n'
     '<blockquote>{old_text}</blockquote>\n\n'
     '<b>Стало:</b>\n'
@@ -11,13 +11,13 @@ EDITED_MESSAGE_FORMAT = (
 
 DELETED_MESSAGE_FORMAT = (
     '<b>УДАЛЕНО</b>\n'
-    '<a href="tg://user?id={user_id}">{user_fullname_escaped}</a> | {timestamp}\n\n'
+    '<a href="{user_link}">{user_fullname_escaped}</a> | {timestamp}\n\n'
     '<b>Сообщение:</b>\n'
     '<blockquote>{old_text}</blockquote>'
 )
 
 NEW_USER_MESSAGE_FORMAT = (
-    '<b>[НОВЫЙ КЛИЕНТ] [ <a href="tg://user?id={user_id}">{user_fullname_escaped}</a> ]</b>\n\n'
+    '<b>[НОВЫЙ КЛИЕНТ] [ <a href="{user_link}">{user_fullname_escaped}</a> ]</b>\n\n'
     '<b>ID: </b><code>{user_id}</code>'
 )
 
@@ -56,14 +56,14 @@ STATUS_UNKNOWN = "❓"
 
 # Media formats with optional caption
 DELETED_PHOTO_FORMAT = (
-    '<b>[УДАЛЕНО] [ <a href="tg://user?id={user_id}">{user_fullname_escaped}</a> ] '
+    '<b>[УДАЛЕНО] [ <a href="{user_link}">{user_fullname_escaped}</a> ] '
     '<code>{user_id}</code></b>\n'
     'Сообщение от {timestamp}\n\n'
     '<b>Удалено: Фото</b>{caption_block}'
 )
 
 DELETED_VIDEO_FORMAT = (
-    '<b>[УДАЛЕНО] [ <a href="tg://user?id={user_id}">{user_fullname_escaped}</a> ] '
+    '<b>[УДАЛЕНО] [ <a href="{user_link}">{user_fullname_escaped}</a> ] '
     '<code>{user_id}</code></b>\n'
     'Сообщение от {timestamp}\n\n'
     '<b>Удалено: Видео</b>\n'
@@ -72,7 +72,7 @@ DELETED_VIDEO_FORMAT = (
 
 DELETED_VIDEO_NOTE_FORMAT = (
     '<b>УДАЛЕНО</b>\n'
-    '<a href="tg://user?id={user_id}">{user_fullname_escaped}</a> | {timestamp}\n\n'
+    '<a href="{user_link}">{user_fullname_escaped}</a> | {timestamp}\n\n'
     '<b>Тип:</b> Видеокружок\n'
     'Длительность: {duration}\n\n'
     'Удаленный круг ниже 👇'
@@ -80,14 +80,14 @@ DELETED_VIDEO_NOTE_FORMAT = (
 
 DELETED_VOICE_FORMAT = (
     '<b>УДАЛЕНО</b>\n'
-    '<a href="tg://user?id={user_id}">{user_fullname_escaped}</a> | {timestamp}\n\n'
+    '<a href="{user_link}">{user_fullname_escaped}</a> | {timestamp}\n\n'
     '<b>Тип:</b> Голосовое\n'
     'Длительность: {duration}{caption_block}'
 )
 
 DELETED_AUDIO_FORMAT = (
     '<b>УДАЛЕНО</b>\n'
-    '<a href="tg://user?id={user_id}">{user_fullname_escaped}</a> | {timestamp}\n\n'
+    '<a href="{user_link}">{user_fullname_escaped}</a> | {timestamp}\n\n'
     '<b>Тип:</b> Аудио\n'
     'Трек: {performer} - {title}\n'
     'Длительность: {duration}{caption_block}'
@@ -95,21 +95,21 @@ DELETED_AUDIO_FORMAT = (
 
 DELETED_DOCUMENT_FORMAT = (
     '<b>УДАЛЕНО</b>\n'
-    '<a href="tg://user?id={user_id}">{user_fullname_escaped}</a> | {timestamp}\n\n'
+    '<a href="{user_link}">{user_fullname_escaped}</a> | {timestamp}\n\n'
     '<b>Тип:</b> Файл\n'
     'Имя: {file_name}{caption_block}'
 )
 
 DELETED_STICKER_FORMAT = (
     '<b>УДАЛЕНО</b>\n'
-    '<a href="tg://user?id={user_id}">{user_fullname_escaped}</a> | {timestamp}\n\n'
+    '<a href="{user_link}">{user_fullname_escaped}</a> | {timestamp}\n\n'
     '<b>Тип:</b> Стикер\n'
     'Эмодзи: {emoji}\n\n'
     'Удаленный стикер ниже 👇'
 )
 
 DELETED_ANIMATION_FORMAT = (
-    '<b>[УДАЛЕНО] [ <a href="tg://user?id={user_id}">{user_fullname_escaped}</a> ] '
+    '<b>[УДАЛЕНО] [ <a href="{user_link}">{user_fullname_escaped}</a> ] '
     '<code>{user_id}</code></b>\n'
     'Сообщение от {timestamp}\n\n'
     '<b>Удалено: GIF</b>\n'
@@ -118,13 +118,13 @@ DELETED_ANIMATION_FORMAT = (
 
 DELETED_CONTACT_FORMAT = (
     '<b>УДАЛЕНО</b>\n'
-    '<a href="tg://user?id={user_id}">{user_fullname_escaped}</a> | {timestamp}\n\n'
+    '<a href="{user_link}">{user_fullname_escaped}</a> | {timestamp}\n\n'
     '<b>Тип:</b> Контакт\n'
     '{contact_info}'
 )
 
 DELETED_LOCATION_FORMAT = (
-    '<b>[УДАЛЕНО] [ <a href="tg://user?id={user_id}">{user_fullname_escaped}</a> ] '
+    '<b>[УДАЛЕНО] [ <a href="{user_link}">{user_fullname_escaped}</a> ] '
     '<code>{user_id}</code></b>\n'
     'Сообщение от {timestamp}\n\n'
     '<b>Удалено: Геолокация</b>\n'
@@ -132,7 +132,7 @@ DELETED_LOCATION_FORMAT = (
 )
 
 DELETED_POLL_FORMAT = (
-    '<b>[УДАЛЕНО] [ <a href="tg://user?id={user_id}">{user_fullname_escaped}</a> ] '
+    '<b>[УДАЛЕНО] [ <a href="{user_link}">{user_fullname_escaped}</a> ] '
     '<code>{user_id}</code></b>\n'
     'Сообщение от {timestamp}\n\n'
     '<b>Удалено: Опрос</b>\n'
@@ -140,7 +140,7 @@ DELETED_POLL_FORMAT = (
 )
 
 DELETED_VENUE_FORMAT = (
-    '<b>[УДАЛЕНО] [ <a href="tg://user?id={user_id}">{user_fullname_escaped}</a> ] '
+    '<b>[УДАЛЕНО] [ <a href="{user_link}">{user_fullname_escaped}</a> ] '
     '<code>{user_id}</code></b>\n'
     'Сообщение от {timestamp}\n\n'
     '<b>Удалено: Место</b>\n'
@@ -148,7 +148,7 @@ DELETED_VENUE_FORMAT = (
 )
 
 DELETED_DICE_FORMAT = (
-    '<b>[УДАЛЕНО] [ <a href="tg://user?id={user_id}">{user_fullname_escaped}</a> ] '
+    '<b>[УДАЛЕНО] [ <a href="{user_link}">{user_fullname_escaped}</a> ] '
     '<code>{user_id}</code></b>\n'
     'Сообщение от {timestamp}\n\n'
     '<b>Удалено: {dice_emoji}</b>\n'
@@ -156,7 +156,7 @@ DELETED_DICE_FORMAT = (
 )
 
 DELETED_GAME_FORMAT = (
-    '<b>[УДАЛЕНО] [ <a href="tg://user?id={user_id}">{user_fullname_escaped}</a> ] '
+    '<b>[УДАЛЕНО] [ <a href="{user_link}">{user_fullname_escaped}</a> ] '
     '<code>{user_id}</code></b>\n'
     'Сообщение от {timestamp}\n\n'
     '<b>Удалено: Игра</b>\n'
@@ -195,3 +195,15 @@ CONTENT_TYPE_NAMES = {
 
 # Caption block template
 CAPTION_BLOCK = '\n<b>Подпись:</b>\n<blockquote><code>{caption}</code></blockquote>'
+
+# Settings
+SETTINGS_HEADER = (
+    '<b>⚙️ Настройки</b>\n\n'
+    'Здесь вы можете настроить поведение бота.'
+)
+
+SETTINGS_NOTIFY_EDIT_BTN = "Мои изменения"
+SETTINGS_ENABLED = "✅ Включено"
+SETTINGS_DISABLED = "❌ Отключено"
+
+SETTINGS_UPDATED_NOTIFICATION = "Настройки обновлены"

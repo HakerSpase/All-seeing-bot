@@ -15,6 +15,7 @@ from html import escape
 
 import pytz
 from aiogram import Router, Bot, Dispatcher, F, types
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.filters import Command
 
 from database import OwnersDB, UsersDB, MessagesDB
@@ -195,6 +196,7 @@ def format_deleted_message(
     extra_data: Optional[str],
     user_fullname_escaped: str,
     user_id: int,
+    user_link: str,
     timestamp: str,
     is_outgoing: bool = False
 ) -> str:
@@ -205,6 +207,7 @@ def format_deleted_message(
     base_params = {
         "user_fullname_escaped": user_fullname_escaped,
         "user_id": user_id,
+        "user_link": user_link,
         "timestamp": timestamp
     }
     
@@ -410,7 +413,62 @@ async def start_command(message: types.Message):
 async def on_startup(bot: Bot):
     await bot.set_my_commands([
         types.BotCommand(command="start", description="Перезапуск / Статус"),
+        types.BotCommand(command="settings", description="Настройки"),
     ])
+
+
+@router.message(Command(commands=["settings"]))
+async def settings_command(message: types.Message):
+    """Handle /settings command."""
+    user_id = message.from_user.id
+    
+    # Check if user is an owner
+    owner = OwnersDB.get_by_user_id(user_id)
+    if not owner:
+        await message.answer(lang.START_MESSAGE_NOT_CONNECTED, parse_mode='html')
+        return
+
+    # Get current setting
+    notify_on_edit = owner.get("notify_on_edit", False)
+    
+    status_text = lang.SETTINGS_ENABLED if notify_on_edit else lang.SETTINGS_DISABLED
+    button_text = f"{lang.SETTINGS_NOTIFY_EDIT_BTN}: {status_text}"
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=button_text, callback_data="settings_toggle_edit_notify")]
+    ])
+    
+    await message.answer(lang.SETTINGS_HEADER, reply_markup=keyboard, parse_mode='html')
+
+
+@router.callback_query(F.data == "settings_toggle_edit_notify")
+async def settings_toggle_callback(callback: CallbackQuery):
+    """Handle settings toggle callback."""
+    user_id = callback.from_user.id
+    
+    owner = OwnersDB.get_by_user_id(user_id)
+    if not owner:
+        await callback.answer(lang.STATUS_NOT_CONNECTED, show_alert=True)
+        return
+        
+    current_status = owner.get("notify_on_edit", False)
+    new_status = not current_status
+    
+    # Update DB
+    if OwnersDB.update_settings(user_id, new_status):
+        # Update message
+        status_text = lang.SETTINGS_ENABLED if new_status else lang.SETTINGS_DISABLED
+        button_text = f"{lang.SETTINGS_NOTIFY_EDIT_BTN}: {status_text}"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=button_text, callback_data="settings_toggle_edit_notify")]
+        ])
+        
+        await callback.message.edit_reply_markup(reply_markup=keyboard)
+        await callback.answer(lang.SETTINGS_UPDATED_NOTIFICATION)
+    else:
+        await callback.answer("Error updating settings", show_alert=True)
+
 
 
 
@@ -431,6 +489,14 @@ async def handle_edited_business_message(message: types.Message):
     stored = MessagesDB.get(owner_id=owner_id, chat_id=chat_id, message_id=message.message_id)
     if not stored:
         return
+        
+    # Check settings for outgoing messages (my edits)
+    # Incoming messages (from clients) are ALWAYS notified
+    if is_outgoing:
+        notify_on_edit = owner.get("notify_on_edit", False)
+        if not notify_on_edit:
+            return
+
     
     # Determine new text based on message type
     new_text = message.text or message.caption
@@ -448,16 +514,29 @@ async def handle_edited_business_message(message: types.Message):
     timestamp_formatted = message_timestamp_local.strftime('%d/%m/%y %H:%M')
     
     # Determine user info based on direction
+    # Determine user info and link
+    username = None
     if is_outgoing:
         user_fullname_escaped = "Вы"
         user_id = chat_id
+        # Try to find client username in DB
+        client_user = UsersDB.get(user_id=chat_id, owner_id=owner_id)
+        if client_user:
+            username = client_user.get("username")
     else:
         user_fullname_escaped = escape(message.from_user.full_name)
         user_id = message.from_user.id
+        username = message.from_user.username
+        
+    # Construct link
+    if username:
+        user_link = f"https://t.me/{username}"
+    else:
+        user_link = f"tg://user?id={user_id}"
     
     msg = lang.EDITED_MESSAGE_FORMAT.format(
         user_fullname_escaped=user_fullname_escaped,
-        user_id=user_id,
+        user_link=user_link,
         timestamp=timestamp_formatted,
         old_text=old_text,
         new_text=new_text
@@ -502,6 +581,14 @@ async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted)
         
         is_outgoing = stored.get("is_outgoing", False)
         
+        # Check settings for outgoing messages (my deletions)
+        if is_outgoing:
+            notify_on_edit = owner.get("notify_on_edit", False)
+            if not notify_on_edit:
+                # Remove from DB anyway to keep it clean, but don't notify
+                MessagesDB.delete(owner_id=owner_id, chat_id=chat_id, message_id=msg_id)
+                continue
+        
         # Format timestamp
         message_timestamp = datetime.fromisoformat(stored["timestamp"].replace('Z', '+00:00'))
         message_timestamp_local = message_timestamp.astimezone(timezone_local)
@@ -522,6 +609,35 @@ async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted)
             except json.JSONDecodeError:
                 pass # Treat as legacy string
         
+        # Determine user info and link for deletion
+        # Note: stored message has info about sender
+        sender_username = stored.get("sender_username")
+        stored_user_id = stored.get("sender_id")
+        
+        # Override if outgoing
+        if is_outgoing:
+            # For outgoing, sender is owner (us), but checking if we want to link to client or us
+            # In edit logic we linked to "Вы" (us) but effectively used client info if possible?
+            # Actually in edit logic: 
+            # if outgoing: user_fullname="Вы", user_id=chat_id (client ID).
+            # Let's align with edit logic
+            
+            # Try to find client username in DB (chat_id is client)
+            client_user = UsersDB.get(user_id=chat_id, owner_id=owner_id)
+            if client_user and client_user.get("username"):
+                sender_username = client_user.get("username")
+            
+            # Use client ID for link generation if outgoing (to link to chat with them)
+            link_user_id = chat_id
+        else:
+            link_user_id = stored_user_id
+            
+        # Construct link
+        if sender_username:
+            user_link = f"https://t.me/{sender_username}"
+        else:
+            user_link = f"tg://user?id={link_user_id}"
+
         # Format text message (used as caption for media or fallback)
         msg = format_deleted_message(
             content_type=stored["content_type"],
@@ -529,7 +645,8 @@ async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted)
             duration=stored["media_duration"],
             extra_data=extra_data_str,
             user_fullname_escaped="Вы" if is_outgoing else user_fullname_escaped,
-            user_id=chat_id,
+            user_id=chat_id, # Keep chat_id as user_id param for consistency/legacy use if any
+            user_link=user_link,
             timestamp=timestamp_formatted,
             is_outgoing=is_outgoing
         )

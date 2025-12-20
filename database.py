@@ -46,6 +46,16 @@ class OwnersDB:
     table_name = "owners"
     
     @staticmethod
+    def update_settings(user_id: int, notify_on_edit: bool) -> bool:
+        """Update owner settings."""
+        try:
+            supabase.table(OwnersDB.table_name).update({"notify_on_edit": notify_on_edit}).eq("user_id", user_id).execute()
+            return True
+        except Exception as e:
+            print(f"Error updating settings: {e}")
+            return False
+
+    @staticmethod
     def add(user_id: int, business_connection_id: str, user_fullname: str, username: Optional[str] = None) -> Optional[Dict]:
         """Register a new owner."""
         try:
