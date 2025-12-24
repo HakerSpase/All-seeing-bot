@@ -4,6 +4,7 @@
 """
 
 # ===== РЕДАКТИРОВАНИЕ =====
+# ===== РЕДАКТИРОВАНИЕ =====
 EDITED_MESSAGE_FORMAT = (
     '<b>ИЗМЕНЕНО</b>\n'
     '<a href="{user_link}">{user_fullname_escaped}</a> | {timestamp}\n\n'
@@ -23,7 +24,8 @@ DELETED_MESSAGE_FORMAT = (
 
 # ===== НОВЫЙ КЛИЕНТ =====
 NEW_USER_MESSAGE_FORMAT = (
-    '<b>[НОВЫЙ КЛИЕНТ] [ <a href="{user_link}">{user_fullname_escaped}</a> ]</b>\n\n'
+    '<b>НОВЫЙ КЛИЕНТ</b>\n'
+    '<a href="{user_link}">{user_fullname_escaped}</a>\n\n'
     '<b>ID: </b><code>{user_id}</code>'
 )
 
@@ -50,13 +52,13 @@ START_MESSAGE_NOT_CONNECTED = (
 
 # ===== ПОДКЛЮЧЕНИЕ/ОТКЛЮЧЕНИЕ =====
 OWNER_CONNECTED_FORMAT = (
-    '<b>[ПОДКЛЮЧЕНИЕ]</b>\n\n'
+    '<b>ПОДКЛЮЧЕНИЕ</b>\n\n'
     'Бот успешно подключен к вашему Telegram Business аккаунту.\n'
     'Теперь вы будете получать уведомления об изменённых и удалённых сообщениях от клиентов.'
 )
 
 OWNER_DISCONNECTED_FORMAT = (
-    '<b>[ОТКЛЮЧЕНИЕ]</b>\n\n'
+    '<b>ОТКЛЮЧЕНИЕ</b>\n\n'
     'Бот отключен от вашего Telegram Business аккаунта.'
 )
 
@@ -67,17 +69,15 @@ STATUS_UNKNOWN = "❓"
 
 # ===== УДАЛЕННЫЕ МЕДИА =====
 DELETED_PHOTO_FORMAT = (
-    '<b>[УДАЛЕНО] [ <a href="{user_link}">{user_fullname_escaped}</a> ] '
-    '<code>{user_id}</code></b>\n'
-    'Сообщение от {timestamp}\n\n'
-    '<b>Удалено: Фото</b>{caption_block}'
+    '<b>УДАЛЕНО</b>\n'
+    '<a href="{user_link}">{user_fullname_escaped}</a> | {timestamp}\n\n'
+    '<b>Тип:</b> Фото{caption_block}'
 )
 
 DELETED_VIDEO_FORMAT = (
-    '<b>[УДАЛЕНО] [ <a href="{user_link}">{user_fullname_escaped}</a> ] '
-    '<code>{user_id}</code></b>\n'
-    'Сообщение от {timestamp}\n\n'
-    '<b>Удалено: Видео</b>\n'
+    '<b>УДАЛЕНО</b>\n'
+    '<a href="{user_link}">{user_fullname_escaped}</a> | {timestamp}\n\n'
+    '<b>Тип:</b> Видео\n'
     'Длительность: {duration}{caption_block}'
 )
 
@@ -120,10 +120,9 @@ DELETED_STICKER_FORMAT = (
 )
 
 DELETED_ANIMATION_FORMAT = (
-    '<b>[УДАЛЕНО] [ <a href="{user_link}">{user_fullname_escaped}</a> ] '
-    '<code>{user_id}</code></b>\n'
-    'Сообщение от {timestamp}\n\n'
-    '<b>Удалено: GIF</b>\n'
+    '<b>УДАЛЕНО</b>\n'
+    '<a href="{user_link}">{user_fullname_escaped}</a> | {timestamp}\n\n'
+    '<b>Тип:</b> GIF\n'
     'Длительность: {duration}{caption_block}'
 )
 
@@ -135,42 +134,37 @@ DELETED_CONTACT_FORMAT = (
 )
 
 DELETED_LOCATION_FORMAT = (
-    '<b>[УДАЛЕНО] [ <a href="{user_link}">{user_fullname_escaped}</a> ] '
-    '<code>{user_id}</code></b>\n'
-    'Сообщение от {timestamp}\n\n'
-    '<b>Удалено: Геолокация</b>\n'
+    '<b>УДАЛЕНО</b>\n'
+    '<a href="{user_link}">{user_fullname_escaped}</a> | {timestamp}\n\n'
+    '<b>Тип:</b> Геолокация\n'
     'Координаты: <code>{coordinates}</code>'
 )
 
 DELETED_POLL_FORMAT = (
-    '<b>[УДАЛЕНО] [ <a href="{user_link}">{user_fullname_escaped}</a> ] '
-    '<code>{user_id}</code></b>\n'
-    'Сообщение от {timestamp}\n\n'
-    '<b>Удалено: Опрос</b>\n'
+    '<b>УДАЛЕНО</b>\n'
+    '<a href="{user_link}">{user_fullname_escaped}</a> | {timestamp}\n\n'
+    '<b>Тип:</b> Опрос\n'
     'Вопрос: {question}'
 )
 
 DELETED_VENUE_FORMAT = (
-    '<b>[УДАЛЕНО] [ <a href="{user_link}">{user_fullname_escaped}</a> ] '
-    '<code>{user_id}</code></b>\n'
-    'Сообщение от {timestamp}\n\n'
-    '<b>Удалено: Место</b>\n'
+    '<b>УДАЛЕНО</b>\n'
+    '<a href="{user_link}">{user_fullname_escaped}</a> | {timestamp}\n\n'
+    '<b>Тип:</b> Место\n'
     '{venue_info}'
 )
 
 DELETED_DICE_FORMAT = (
-    '<b>[УДАЛЕНО] [ <a href="{user_link}">{user_fullname_escaped}</a> ] '
-    '<code>{user_id}</code></b>\n'
-    'Сообщение от {timestamp}\n\n'
-    '<b>Удалено: {dice_emoji}</b>\n'
+    '<b>УДАЛЕНО</b>\n'
+    '<a href="{user_link}">{user_fullname_escaped}</a> | {timestamp}\n\n'
+    '<b>Тип:</b> {dice_emoji}\n'
     'Значение: {dice_value}'
 )
 
 DELETED_GAME_FORMAT = (
-    '<b>[УДАЛЕНО] [ <a href="{user_link}">{user_fullname_escaped}</a> ] '
-    '<code>{user_id}</code></b>\n'
-    'Сообщение от {timestamp}\n\n'
-    '<b>Удалено: Игра</b>\n'
+    '<b>УДАЛЕНО</b>\n'
+    '<a href="{user_link}">{user_fullname_escaped}</a> | {timestamp}\n\n'
+    '<b>Тип:</b> Игра\n'
     '{game_title}'
 )
 

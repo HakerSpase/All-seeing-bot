@@ -40,7 +40,10 @@ async def start_command(message: types.Message):
     if owner:
         msg = lang.START_MESSAGE_CONNECTED
     else:
-        premium_status = lang.STATUS_UNKNOWN
+        # Проверяем Premium
+        is_premium = bool(message.from_user.is_premium)
+        premium_status = lang.STATUS_CONNECTED if is_premium else lang.STATUS_NOT_CONNECTED
+        
         bot_status = lang.STATUS_NOT_CONNECTED
         
         msg = lang.START_MESSAGE_NOT_CONNECTED.format(

@@ -71,6 +71,21 @@ async def handle_business_connection(event: types.BusinessConnection):
             logger.error(f"Ошибка отправки уведомления об отключении {user_id}: {e}")
 
 
+# Хелпер для извлечения file_id из extra_data (str или dict)
+def extract_file_id(extra_data) -> Optional[str]:
+    if not extra_data:
+        return None
+    try:
+        data = extra_data
+        if isinstance(data, str) and data.startswith('{'):
+            data = json.loads(data)
+        
+        if isinstance(data, dict):
+            return data.get("file_id")
+    except:
+        pass
+    return None
+
 @router.edited_business_message()
 async def handle_edited_business_message(message: types.Message):
     """Обработчик редактирования сообщения."""
@@ -112,22 +127,8 @@ async def handle_edited_business_message(message: types.Message):
     new_extra = new_content_info.get("extra_data")
     old_extra = stored.get("extra_data")
     
-    new_file_id = None
-    old_file_id = None
-    
-    if new_extra:
-        try:
-            new_file_id = json.loads(new_extra).get("file_id")
-        except:
-            pass
-            
-    if old_extra:
-        try:
-            # old_extra может быть уже dict если мы неаккуратно сохранили, или str
-            if isinstance(old_extra, str) and old_extra.startswith('{'):
-                old_file_id = json.loads(old_extra).get("file_id")
-        except:
-            pass
+    new_file_id = extract_file_id(new_extra)
+    old_file_id = extract_file_id(old_extra)
             
     # Если и там и там есть file_id, сравниваем их
     if new_file_id and old_file_id and new_file_id != old_file_id:
@@ -162,41 +163,125 @@ async def handle_edited_business_message(message: types.Message):
         user_link = f"https://t.me/{username}" if username else f"tg://user?id={message.from_user.id}"
         
     # Формируем сообщение
-    change_info = ""
-    
-    if type_changed:
-        change_info += f"\n🔄 <b>Тип изменён:</b> {old_type} ➡️ {new_type}"
-    elif media_changed:
-        change_info += f"\n🔄 <b>Медиа изменено</b> ({new_type})"
+    # Если изменился только медиа-файл (без текста), используем специальный формат
+    if (type_changed or media_changed) and not text_changed:
+        # Специальный формат для изменения медиа
+        old_type_name = lang.CONTENT_TYPE_NAMES.get(old_type, old_type)
+        new_type_name = lang.CONTENT_TYPE_NAMES.get(new_type, new_type)
         
-    if text_changed:
-        if type_changed or media_changed:
-            change_info += f"\n✏️ <b>Текст изменён:</b>\n🔴 <s>{old_text}</s>\n🟢 {new_text}"
+        if type_changed:
+            change_description = f"<b>Тип изменён:</b> {old_type_name} ➡️ {new_type_name}"
         else:
-            # Только текст изменился
-            change_info += f"\n🔴 <s>{old_text}</s>\n🟢 {new_text}"
-    elif (type_changed or media_changed) and not text_changed:
-         change_info += f"\n📝 <b>Текст:</b> {new_text}"
-
-    header = "📝 <b>ИЗМЕНЕНО (ВЫ)</b>" if is_outgoing else "✏️ <b>ИЗМЕНЕНО</b>"
-    
-    # Для исходящих показываем кому писали, для входящих - от кого
-    if is_outgoing:
-        # Получаем имя получателя из чата
-        chat_name = escape(message.chat.full_name or message.chat.first_name or str(chat_id))
-        recipient_info = f"\n💬 <b>Кому:</b> {chat_name}"
+            # media_changed но тип тот же (например, фото на другое фото)
+            change_description = f"<b>Медиа обновлено:</b> {new_type_name} заменено на другое"
+        
+        msg = (
+            f"<b>ИЗМЕНЕНО</b>\n"
+            f"<a href='{user_link}'>{user_fullname_escaped}</a> | {timestamp_formatted}\n\n"
+            f"{change_description}"
+        )
+        
+        # Если есть подпись/текст, добавляем
+        if new_text != "[пусто]":
+            msg += f"\n\n<b>Подпись:</b>\n<blockquote>{escape(new_text)}</blockquote>"
+        
+        # Отправляем текстовое уведомление
+        await send_notification(message.bot, owner_id, msg)
+        
+        # Теперь отправляем визуальное сравнение медиа (если оба file_id есть)
+        async def send_media_by_type(bot, user_id, file_id, content_type, caption):
+            """Хелпер для отправки медиа по типу."""
+            try:
+                if content_type == "photo":
+                    await bot.send_photo(user_id, file_id, caption=caption, parse_mode='html')
+                elif content_type == "video":
+                    await bot.send_video(user_id, file_id, caption=caption, parse_mode='html')
+                elif content_type == "animation":
+                    await bot.send_animation(user_id, file_id, caption=caption, parse_mode='html')
+                elif content_type == "document":
+                    await bot.send_document(user_id, file_id, caption=caption, parse_mode='html')
+                elif content_type == "sticker":
+                    await send_notification(bot, user_id, caption)
+                    await bot.send_sticker(user_id, file_id)
+                elif content_type == "video_note":
+                    await send_notification(bot, user_id, caption)
+                    await bot.send_video_note(user_id, file_id)
+                elif content_type == "voice":
+                    await bot.send_voice(user_id, file_id, caption=caption, parse_mode='html')
+                elif content_type == "audio":
+                    await bot.send_audio(user_id, file_id, caption=caption, parse_mode='html')
+                else:
+                    await send_notification(bot, user_id, f"{caption}\n<i>[{content_type}]</i>")
+                return True
+            except Exception as e:
+                logger.warning(f"Ошибка отправки медиа сравнения: {e}")
+                return False
+        
+        # Отправляем старое медиа (Было)
+        if old_file_id:
+            await send_media_by_type(message.bot, owner_id, old_file_id, old_type, "<b>Было:</b>")
+        
+        # Отправляем новое медиа (Стало)
+        if new_file_id:
+            await send_media_by_type(message.bot, owner_id, new_file_id, new_type, "<b>Стало:</b>")
+            
     else:
-        recipient_info = ""
-    
-    msg = (
-        f"{header}\n"
-        f"👤 <a href='{user_link}'>{user_fullname_escaped}</a>"
-        f"{recipient_info}\n"
-        f"🕒 {timestamp_formatted}"
-        f"{change_info}"
-    )
-    
-    await send_notification(message.bot, owner_id, msg)
+        # Определяем: это изменение обычного текста или подписи к медиа?
+        is_caption_edit = new_type != "text"  # Если тип не "text", значит это подпись к медиа
+        
+        if is_caption_edit:
+            # Специальный формат для изменения подписи к медиа
+            media_type_name = lang.CONTENT_TYPE_NAMES.get(new_type, new_type)
+            
+            msg = (
+                f"<b>ИЗМЕНЕНО</b>\n"
+                f"<a href='{user_link}'>{user_fullname_escaped}</a> | {timestamp_formatted}\n\n"
+                f"<b>Подпись к {media_type_name} изменена:</b>\n\n"
+                f"<b>Было:</b>\n"
+                f"<blockquote>{escape(old_text) if old_text != '[пусто]' else '<i>пусто</i>'}</blockquote>\n\n"
+                f"<b>Стало:</b>\n"
+                f"<blockquote>{escape(new_text) if new_text != '[пусто]' else '<i>пусто</i>'}</blockquote>"
+            )
+        else:
+            # Стандартный формат для текстовых сообщений
+            msg = lang.EDITED_MESSAGE_FORMAT.format(
+                user_link=user_link,
+                user_fullname_escaped=user_fullname_escaped,
+                timestamp=timestamp_formatted,
+                old_text=escape(old_text) if old_text != "[пусто]" else "<i>пусто</i>",
+                new_text=escape(new_text) if new_text != "[пусто]" else "<i>пусто</i>"
+            )
+        
+        # Добавляем инфо о смене типа/медиа если было (в дополнение к тексту)
+        extra_info = ""
+        if type_changed:
+            extra_info = f"\n\n<b>Инфо:</b> Тип медиа изменён ({lang.CONTENT_TYPE_NAMES.get(old_type, old_type)} ➡️ {lang.CONTENT_TYPE_NAMES.get(new_type, new_type)})"
+        elif media_changed:
+            extra_info = f"\n\n<b>Инфо:</b> Медиа вложение также обновлено"
+            
+        msg += extra_info
+
+        await send_notification(message.bot, owner_id, msg)
+        
+        # Если медиа изменилось вместе с текстом, тоже покажем визуальное сравнение
+        if media_changed and old_file_id and new_file_id:
+            try:
+                # Отправляем старое
+                if old_type == "photo":
+                    await message.bot.send_photo(owner_id, old_file_id, caption="<b>Было:</b>", parse_mode='html')
+                elif old_type == "video":
+                    await message.bot.send_video(owner_id, old_file_id, caption="<b>Было:</b>", parse_mode='html')
+                elif old_type == "document":
+                    await message.bot.send_document(owner_id, old_file_id, caption="<b>Было:</b>", parse_mode='html')
+                # Отправляем новое
+                if new_type == "photo":
+                    await message.bot.send_photo(owner_id, new_file_id, caption="<b>Стало:</b>", parse_mode='html')
+                elif new_type == "video":
+                    await message.bot.send_video(owner_id, new_file_id, caption="<b>Стало:</b>", parse_mode='html')
+                elif new_type == "document":
+                    await message.bot.send_document(owner_id, new_file_id, caption="<b>Стало:</b>", parse_mode='html')
+            except Exception as e:
+                logger.debug(f"Не удалось отправить медиа сравнение: {e}")
     
     # Обновляем сообщение в кеше (мгновенно) и БД (асинхронно)
     message_cache.update(
@@ -229,10 +314,10 @@ async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted)
         return
     
     owner_id = owner["user_id"]
-    notify_on_edit = owner.get("notify_on_edit", False)
     
-    # Собираем информацию о всех удаленных сообщениях
+    # 1. Собираем сообщения
     deleted_messages = []
+    notify_on_edit = owner.get("notify_on_edit", False)
     
     for msg_id in event.message_ids:
         # Сначала кеш, потом БД
@@ -244,7 +329,7 @@ async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted)
             
         is_outgoing = stored.get("is_outgoing", False)
         if is_outgoing and not notify_on_edit:
-            # Просто удаляем из кеша и БД без уведомления
+            # Молча удаляем
             message_cache.delete(owner_id=owner_id, chat_id=chat_id, message_id=msg_id)
             await asyncio.to_thread(MessagesDB.delete, owner_id=owner_id, chat_id=chat_id, message_id=msg_id)
             continue
@@ -254,131 +339,206 @@ async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted)
     if not deleted_messages:
         return
 
-    # Бэкапим в Google Sheets перед удалением (чтобы сохранить историю)
+    # Бэкапим
     if storage_mgr:
         await storage_mgr.log_deleted_messages(deleted_messages)
 
-    # Если сообщений много (>1), шлём сводку
-    if len(deleted_messages) > 1:
-        chat_name = escape(event.chat.full_name or event.chat.first_name or str(chat_id))
-        
-        # Проверяем, есть ли среди них исходящие
-        has_outgoing = any(m.get("is_outgoing") for m in deleted_messages)
-        
-        summary = f"🗑 <b>МАССОВОЕ УДАЛЕНИЕ ({len(deleted_messages)})</b>\n"
-        if has_outgoing:
-            summary += f"💬 <b>Кому:</b> {chat_name}\n\n"
-        else:
-            summary += f"👤 <b>От:</b> {chat_name}\n\n"
-        
-        for i, msg_data in enumerate(deleted_messages, 1):
-            msg_type = msg_data.get("content_type", "text")
-            text = msg_data.get("message_text") or "[без текста]"
-            time_str = "?"
-            if msg_data.get("timestamp"):
-                try:
-                    dt = datetime.fromisoformat(msg_data["timestamp"].replace('Z', '+00:00'))
-                    time_str = dt.astimezone(TIMEZONE).strftime('%H:%M')
-                except:
-                    pass
-            
-            # Обрезаем длинный текст
-            if len(text) > 50:
-                text = text[:50] + "..."
-                
-            summary += f"{i}. <code>{time_str}</code> [{msg_type}] {escape(text)}\n"
-        
-        await send_notification(event.bot, owner_id, summary)
-        
-        # Удаляем из кеша и БД
-        for msg in deleted_messages:
-            message_cache.delete(owner_id=owner_id, chat_id=chat_id, message_id=msg["message_id"])
-            await asyncio.to_thread(MessagesDB.delete, owner_id=owner_id, chat_id=chat_id, message_id=msg["message_id"])
-            
-    else:
-        # Если одно сообщение — используем старый красивый формат с медиа
-        stored = deleted_messages[0]
-        msg_id = stored["message_id"]
-        is_outgoing = stored.get("is_outgoing", False)
-        
-        # Форматируем время
-        try:
-            message_timestamp = datetime.fromisoformat(stored["timestamp"].replace('Z', '+00:00'))
-            message_timestamp_local = message_timestamp.astimezone(TIMEZONE)
-            timestamp_formatted = message_timestamp_local.strftime('%d/%m/%y %H:%M')
-        except:
-            timestamp_formatted = "???"
+    # 2. Подготовка общих данных
+    chat_name = escape(event.chat.full_name or event.chat.first_name or str(chat_id))
+    user_link = f"tg://user?id={chat_id}"
+    client_user = await asyncio.to_thread(UsersDB.get, user_id=chat_id, owner_id=owner_id)
+    if client_user and client_user.get("username"):
+        user_link = f"https://t.me/{client_user.get('username')}"
 
-        # Приводим к формату для user_link
-        user_link = f"tg://user?id={chat_id}" # Simplification for deleted
+    # Хелперы
+    def get_time_str(iso_time):
+        try:
+            dt = datetime.fromisoformat(iso_time.replace('Z', '+00:00'))
+            return dt.astimezone(TIMEZONE).strftime('%H:%M')
+        except:
+            return "?"
+            
+    def get_full_date_str(iso_time):
+        try:
+            dt = datetime.fromisoformat(iso_time.replace('Z', '+00:00'))
+            return dt.astimezone(TIMEZONE).strftime('%d/%m/%y %H:%M')
+        except:
+            return "???"
+
+    # === ЛОГИКА ОТПРАВКИ ===
+    
+    async def send_text_batch(batch):
+        if not batch: return
         
-        # Формируем текст
+        # Если одно - отправляем красиво как одиночное
+        if len(batch) == 1:
+            msg_data = batch[0]
+            is_outgoing = msg_data.get("is_outgoing", False)
+            timestamp_fmt = get_full_date_str(msg_data["timestamp"])
+            fullname = "Вы" if is_outgoing else escape(event.chat.full_name or "Client")
+            
+            msg = format_deleted_message(
+                content_type="text",
+                message_text=msg_data["message_text"],
+                duration=None,
+                extra_data=None,
+                user_fullname_escaped=fullname,
+                user_id=chat_id,
+                user_link=user_link,
+                timestamp=timestamp_fmt,
+                is_outgoing=is_outgoing
+            )
+            if is_outgoing:
+                msg = msg.replace("\n", f"\n💬 <b>Кому:</b> {chat_name}\n", 1)
+            await send_notification(event.bot, owner_id, msg)
+        else:
+            # Сводка текстов
+            has_outgoing = any(m.get("is_outgoing") for m in batch)
+            header = f"<b>МАССОВОЕ УДАЛЕНИЕ (Текст: {len(batch)})</b>"
+            user_block = f"💬 <b>Кому:</b> {chat_name}" if has_outgoing else f"👤 <a href='{user_link}'>{chat_name}</a>"
+            summary = f"{header}\n{user_block}\n\n"
+            for i, item in enumerate(batch, 1):
+                t_str = get_time_str(item["timestamp"])
+                txt = escape(item["message_text"] or "[без текста]")
+                summary += f"<b>{i}. {t_str}</b>\n<blockquote>{txt}</blockquote>\n\n"
+            await send_notification(event.bot, owner_id, summary)
+
+    async def send_media_item(msg_data):
+        is_outgoing = msg_data.get("is_outgoing", False)
+        timestamp_fmt = get_full_date_str(msg_data["timestamp"])
+        fullname = "Вы" if is_outgoing else escape(event.chat.full_name or "Client")
+        
         msg = format_deleted_message(
-            content_type=stored["content_type"],
-            message_text=stored["message_text"],
-            duration=stored["media_duration"],
-            extra_data=stored["extra_data"],
-            user_fullname_escaped="Вы" if is_outgoing else escape(event.chat.full_name or "Client"),
+            content_type=msg_data["content_type"],
+            message_text=msg_data["message_text"],
+            duration=msg_data.get("media_duration"),
+            extra_data=msg_data.get("extra_data"),
+            user_fullname_escaped=fullname,
             user_id=chat_id,
             user_link=user_link,
-            timestamp=timestamp_formatted,
+            timestamp=timestamp_fmt,
             is_outgoing=is_outgoing
         )
         
-        # Для исходящих добавляем кому было адресовано
         if is_outgoing:
-            chat_name = escape(event.chat.full_name or event.chat.first_name or str(chat_id))
             msg = msg.replace("\n", f"\n💬 <b>Кому:</b> {chat_name}\n", 1)
-        
-        # Пытаемся отправить медиа, если есть file_id
-        sent_media = False
-        extra_data_raw = stored.get("extra_data")
-        file_id = None
-        if extra_data_raw and extra_data_raw.startswith('{'):
-            try:
-                file_id = json.loads(extra_data_raw).get("file_id")
-            except: 
-                pass
-                
+            
+        file_id = extract_file_id(msg_data.get("extra_data"))
+            
+        sent = False
         if file_id:
             try:
-                content_type = stored["content_type"]
-                # Упрощенная логика отправки медиа (как была)
-                if content_type == "photo":
-                    await event.bot.send_photo(owner_id, file_id, caption=msg, parse_mode='html')
-                    sent_media = True
-                elif content_type == "video":
-                    await event.bot.send_video(owner_id, file_id, caption=msg, parse_mode='html')
-                    sent_media = True
-                elif content_type == "animation":
-                    await event.bot.send_animation(owner_id, file_id, caption=msg, parse_mode='html')
-                    sent_media = True
-                elif content_type == "document":
-                    await event.bot.send_document(owner_id, file_id, caption=msg, parse_mode='html')
-                    sent_media = True
-                elif content_type == "audio":
-                    await event.bot.send_audio(owner_id, file_id, caption=msg, parse_mode='html')
-                    sent_media = True
-                elif content_type == "voice":
-                    await event.bot.send_voice(owner_id, file_id, caption=msg, parse_mode='html')
-                    sent_media = True
-                elif content_type == "sticker":
-                    await send_notification(event.bot, owner_id, msg)
+                ct = msg_data["content_type"]
+                if ct == "sticker":
                     await event.bot.send_sticker(owner_id, file_id)
-                    sent_media = True
-                elif content_type == "video_note":
+                elif ct == "video_note":
                     await send_notification(event.bot, owner_id, msg)
                     await event.bot.send_video_note(owner_id, file_id)
-                    sent_media = True
-                    
+                elif ct == "photo":
+                    await event.bot.send_photo(owner_id, file_id, caption=msg, parse_mode='html')
+                elif ct == "video":
+                    await event.bot.send_video(owner_id, file_id, caption=msg, parse_mode='html')
+                elif ct == "animation":
+                    await event.bot.send_animation(owner_id, file_id, caption=msg, parse_mode='html')
+                elif ct == "document":
+                    await event.bot.send_document(owner_id, file_id, caption=msg, parse_mode='html')
+                elif ct == "audio":
+                    await event.bot.send_audio(owner_id, file_id, caption=msg, parse_mode='html')
+                elif ct == "voice":
+                    await event.bot.send_voice(owner_id, file_id, caption=msg, parse_mode='html')
+                else:
+                    await send_notification(event.bot, owner_id, msg)
+                sent = True
             except Exception as e:
-                logger.warning(f"Не удалось переслать медиа ({stored['content_type']}): {e}")
+                logger.warning(f"Ошибка отправки медиа {msg_data['message_id']}: {e}")
         
-        if not sent_media:
-            await send_notification(event.bot, owner_id, msg)
+        if not sent:
+             await send_notification(event.bot, owner_id, msg)
+
+    # 3. Основной цикл сортировки и отправки
+    text_buffer = []
+    
+    # Переменные для группировки стикеров
+    current_sticker_id = None
+    current_sticker_count = 0
+    current_sticker_sample = None
+    
+    async def flush_sticker_group():
+        nonlocal current_sticker_id, current_sticker_count, current_sticker_sample
+        if current_sticker_count > 0 and current_sticker_sample:
+            if current_sticker_count > 1:
+                # Группа свернутая
+                smpl = current_sticker_sample
+                is_outline = smpl.get("is_outgoing", False)
+                ts_fmt = get_full_date_str(smpl["timestamp"])
+                fname = "Вы" if is_outline else escape(event.chat.full_name or "Client")
+                
+                header_txt = f"<b>УДАЛЕНО ({current_sticker_count} стикеров)</b>"
+                txt_msg = (
+                    f"{header_txt}\n"
+                    f"<a href='{user_link}'>{fname}</a> | {ts_fmt}\n\n"
+                    f"<b>Тип:</b> Одинаковые стикеры (x{current_sticker_count})"
+                )
+                if is_outline:
+                     txt_msg = txt_msg.replace("\n", f"\n💬 <b>Кому:</b> {chat_name}\n", 1)
+                
+                await send_notification(event.bot, owner_id, txt_msg)
+                await send_media_item(smpl) # Отправляем 1 раз
+            else:
+                # Один стикер - отправляем как обычно
+                await send_media_item(current_sticker_sample)
+                
+        # Сброс
+        current_sticker_id = None
+        current_sticker_count = 0
+        current_sticker_sample = None
+        
+    for msg in deleted_messages:
+        ct = msg["content_type"]
+        
+        if ct == "sticker":
+            # Сначала скидываем накопленные тексты
+            if text_buffer:
+                await send_text_batch(text_buffer)
+                text_buffer = []
             
-        message_cache.delete(owner_id=owner_id, chat_id=chat_id, message_id=msg_id)
-        await asyncio.to_thread(MessagesDB.delete, owner_id=owner_id, chat_id=chat_id, message_id=msg_id)
+            # Получаем file_id
+            fid = extract_file_id(msg.get("extra_data"))
+            
+            # Сравниваем с предыдущим
+            if fid and fid == current_sticker_id:
+                # Тот же самый стикер
+                current_sticker_count += 1
+            else:
+                # Другой стикер (или первый) - скидываем предыдущую группу
+                await flush_sticker_group()
+                
+                # Начинаем новую
+                current_sticker_id = fid
+                current_sticker_count = 1
+                current_sticker_sample = msg
+                
+        else: # Не стикер
+            # Скидываем стикеры если были
+            await flush_sticker_group()
+            
+            if ct == "text":
+                text_buffer.append(msg)
+            else:
+                # Медиа - скидываем тексты
+                await send_text_batch(text_buffer)
+                text_buffer = []
+                # Отправляем медиа
+                await send_media_item(msg)
+            
+    # Отправляем остатки
+    await flush_sticker_group()
+    await send_text_batch(text_buffer)
+    
+    # 4. Удаляем из БД
+    for msg in deleted_messages:
+        message_cache.delete(owner_id=owner_id, chat_id=chat_id, message_id=msg["message_id"])
+        await asyncio.to_thread(MessagesDB.delete, owner_id=owner_id, chat_id=chat_id, message_id=msg["message_id"])
 
 
 @router.business_message()
@@ -402,9 +562,21 @@ async def handle_business_message(message: types.Message):
         user_fullname = message.from_user.full_name
         user_fullname_escaped = escape(user_fullname)
         
+        # Проверяем Premium (None -> False)
+        is_premium = bool(message.from_user.is_premium)
+        
         user_record = await asyncio.to_thread(UsersDB.get, user_id=user_id, owner_id=owner_id)
+        
         if not user_record:
-            await asyncio.to_thread(UsersDB.add, user_id=user_id, owner_id=owner_id, user_fullname=user_fullname, username=message.from_user.username)
+            # Новый пользователь
+            await asyncio.to_thread(
+                UsersDB.add, 
+                user_id=user_id, 
+                owner_id=owner_id, 
+                user_fullname=user_fullname, 
+                username=message.from_user.username,
+                is_premium=is_premium
+            )
             
             if message.from_user.username:
                 user_link = f"https://t.me/{message.from_user.username}"
@@ -416,7 +588,18 @@ async def handle_business_message(message: types.Message):
                 user_id=user_id,
                 user_link=user_link
             )
+            
+            if is_premium:
+                msg += "\n💎 <b>Telegram Premium</b>"
+                
             await send_notification(message.bot, owner_id, msg)
+        else:
+            # Пользователь есть, проверяем изменился ли статус премиум (или если его не было записано)
+            # В базе is_premium может быть None (если старая запись) или bool
+            db_premium = user_record.get("is_premium")
+            if bool(db_premium) != is_premium:
+                await asyncio.to_thread(UsersDB.update, user_id=user_id, owner_id=owner_id, is_premium=is_premium)
+                logger.info(f"Updated Premium status for user {user_id}: {is_premium}")
     
     # Извлекаем информацию о контенте
     content_info = get_content_type(message)
@@ -440,7 +623,7 @@ async def handle_business_message(message: types.Message):
         "media_duration": content_info["duration"],
         "media_file_size": content_info["file_size"],
         "extra_data": content_info["extra_data"],
-        "file_id": json.loads(content_info["extra_data"]).get("file_id") if content_info["extra_data"] and "file_id" in content_info["extra_data"] else None
+        "file_id": extract_file_id(content_info["extra_data"])
     }
     
     # Сохраняем в кеш СРАЗУ (мгновенно доступно для edit/delete)

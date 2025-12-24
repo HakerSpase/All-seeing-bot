@@ -105,7 +105,24 @@ def format_deleted_message(
         )
     
     elif content_type == "document":
-        file_name_escaped = escape(extra_data or "Файл")
+        file_name = "Файл"
+        if extra_data:
+            try:
+                data = extra_data
+                # Если строка — парсим
+                if isinstance(extra_data, str) and extra_data.startswith('{'):
+                    data = json.loads(extra_data)
+                
+                # Если словарь (уже распарсен или был передан как dict)
+                if isinstance(data, dict):
+                    file_name = data.get("info") or data.get("file_name") or "Файл"
+                else:
+                    # Просто строка (не JSON)
+                    file_name = str(data)
+            except:
+                file_name = str(extra_data)
+                
+        file_name_escaped = escape(file_name)
         msg = lang.DELETED_DOCUMENT_FORMAT.format(
             **base_params, 
             file_name=file_name_escaped,
