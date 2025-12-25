@@ -6,7 +6,7 @@
 import json
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from html import escape
 from typing import Optional
 
@@ -16,6 +16,7 @@ from config import lang, TIMEZONE
 from database import OwnersDB, UsersDB, MessagesDB, message_cache
 from utils import format_deleted_message, send_notification, get_content_type
 from storage import StorageManager
+import traceback
 
 router = Router(name="business")
 logger = logging.getLogger(__name__)
@@ -38,13 +39,22 @@ async def handle_business_connection(event: types.BusinessConnection):
     connection_id = event.id
     
     if event.is_enabled:
-        # Подключение
+        # Подключение - сначала загружаем аватарку
+        avatar_file_id = None
+        try:
+            photos = await event.bot.get_user_profile_photos(user_id, limit=1)
+            if photos.total_count > 0:
+                avatar_file_id = photos.photos[0][0].file_id
+        except Exception as e:
+            logger.warning(f"Не удалось получить аватарку владельца {user_id}: {e}")
+        
         await asyncio.to_thread(
             OwnersDB.add,
             user_id=user_id,
             business_connection_id=connection_id,
             user_fullname=user_fullname,
-            username=event.user.username
+            username=event.user.username,
+            avatar_file_id=avatar_file_id
         )
         logger.info(f"Владелец подключен: {user_fullname} ({user_id})")
         
@@ -320,18 +330,21 @@ async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted)
     notify_on_edit = owner.get("notify_on_edit", False)
     
     for msg_id in event.message_ids:
-        # Сначала кеш, потом БД
+        # 0. В ЛЮБОМ СЛУЧАЕ помечаем как удаленное в БД (Soft Delete)
+        # Это критично, чтобы статус обновился даже если мы не нашли сообщение для уведомления
+        await asyncio.to_thread(MessagesDB.delete, owner_id=owner_id, chat_id=chat_id, message_id=msg_id)
+        message_cache.delete(owner_id=owner_id, chat_id=chat_id, message_id=msg_id)
+
+        # Сначала кеш, потом БД (для уведомления)
         stored = message_cache.get(owner_id=owner_id, chat_id=chat_id, message_id=msg_id)
         if not stored:
-            stored = await asyncio.to_thread(MessagesDB.get, owner_id=owner_id, chat_id=chat_id, message_id=msg_id)
+             stored = await asyncio.to_thread(MessagesDB.get, owner_id=owner_id, chat_id=chat_id, message_id=msg_id)
+        
         if not stored:
             continue
             
         is_outgoing = stored.get("is_outgoing", False)
         if is_outgoing and not notify_on_edit:
-            # Молча удаляем
-            message_cache.delete(owner_id=owner_id, chat_id=chat_id, message_id=msg_id)
-            await asyncio.to_thread(MessagesDB.delete, owner_id=owner_id, chat_id=chat_id, message_id=msg_id)
             continue
             
         deleted_messages.append(stored)
@@ -430,6 +443,7 @@ async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted)
             try:
                 ct = msg_data["content_type"]
                 if ct == "sticker":
+                    await send_notification(event.bot, owner_id, msg)
                     await event.bot.send_sticker(owner_id, file_id)
                 elif ct == "video_note":
                     await send_notification(event.bot, owner_id, msg)
@@ -483,7 +497,13 @@ async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted)
                      txt_msg = txt_msg.replace("\n", f"\n💬 <b>Кому:</b> {chat_name}\n", 1)
                 
                 await send_notification(event.bot, owner_id, txt_msg)
-                await send_media_item(smpl) # Отправляем 1 раз
+                # Отправляем сам стикер напрямую (без дополнительного уведомления)
+                file_id = extract_file_id(smpl.get("extra_data"))
+                if file_id:
+                    try:
+                        await event.bot.send_sticker(owner_id, file_id)
+                    except Exception as e:
+                        logger.warning(f"Ошибка отправки стикера группы: {e}")
             else:
                 # Один стикер - отправляем как обычно
                 await send_media_item(current_sticker_sample)
@@ -536,9 +556,8 @@ async def handle_deleted_business_messages(event: types.BusinessMessagesDeleted)
     await send_text_batch(text_buffer)
     
     # 4. Удаляем из БД
-    for msg in deleted_messages:
-        message_cache.delete(owner_id=owner_id, chat_id=chat_id, message_id=msg["message_id"])
-        await asyncio.to_thread(MessagesDB.delete, owner_id=owner_id, chat_id=chat_id, message_id=msg["message_id"])
+    # Удаление из БД перемещено в начало цикла по ID, чтобы гарантировать удаление
+    # даже если сообщения нет в кеше/базе для уведомления.
 
 
 @router.business_message()
@@ -569,13 +588,23 @@ async def handle_business_message(message: types.Message):
         
         if not user_record:
             # Новый пользователь
+            # Пробуем получить аватарку
+            avatar_file_id = None
+            try:
+                photos = await message.bot.get_user_profile_photos(user_id, limit=1)
+                if photos.total_count > 0:
+                    avatar_file_id = photos.photos[0][0].file_id # Берем маленькую
+            except Exception as e:
+                logger.warning(f"Failed to get profile photo for {user_id}: {e}")
+
             await asyncio.to_thread(
                 UsersDB.add, 
                 user_id=user_id, 
                 owner_id=owner_id, 
                 user_fullname=user_fullname, 
                 username=message.from_user.username,
-                is_premium=is_premium
+                is_premium=is_premium,
+                avatar_file_id=avatar_file_id
             )
             
             if message.from_user.username:
@@ -594,12 +623,38 @@ async def handle_business_message(message: types.Message):
                 
             await send_notification(message.bot, owner_id, msg)
         else:
-            # Пользователь есть, проверяем изменился ли статус премиум (или если его не было записано)
-            # В базе is_premium может быть None (если старая запись) или bool
+            # Пользователь есть, проверяем изменился ли статус премиум
             db_premium = user_record.get("is_premium")
+            updates = {}
             if bool(db_premium) != is_premium:
-                await asyncio.to_thread(UsersDB.update, user_id=user_id, owner_id=owner_id, is_premium=is_premium)
-                logger.info(f"Updated Premium status for user {user_id}: {is_premium}")
+                updates["is_premium"] = is_premium
+            
+            # Обновляем аватарку раз в сутки или если её нет
+            last_avatar_check = user_record.get("avatar_updated_at")
+            should_check_avatar = True
+            
+            if last_avatar_check:
+                try:
+                    last_check_dt = datetime.fromisoformat(last_avatar_check.replace('Z', '+00:00'))
+                    if datetime.now(timezone.utc) - last_check_dt < timedelta(hours=24):
+                        should_check_avatar = False
+                except:
+                    pass
+            
+            if should_check_avatar:
+                try:
+                    photos = await message.bot.get_user_profile_photos(user_id, limit=1)
+                    if photos.total_count > 0:
+                        new_avatar = photos.photos[0][0].file_id
+                        # Обновляем только если аватарка изменилась или её не было
+                        if new_avatar != user_record.get("avatar_file_id"):
+                            updates["avatar_file_id"] = new_avatar
+                    updates["avatar_updated_at"] = datetime.now(timezone.utc).isoformat()
+                except: pass
+            
+            if updates:
+                await asyncio.to_thread(UsersDB.update, user_id=user_id, owner_id=owner_id, **updates)
+                logger.info(f"Updated User {user_id}: {list(updates.keys())}")
     
     # Извлекаем информацию о контенте
     content_info = get_content_type(message)
@@ -608,11 +663,17 @@ async def handle_business_message(message: types.Message):
     message_datetime_utc = message.date.replace(tzinfo=timezone.utc)
     timestamp_iso = message_datetime_utc.isoformat()
     
+    # Дополнительные данные: reply_to
+    reply_to_message_id = None
+    if message.reply_to_message:
+        reply_to_message_id = message.reply_to_message.message_id
+    
     # Подготавливаем данные
     msg_data = {
         "owner_id": owner_id,
         "chat_id": chat_id,
         "message_id": message.message_id,
+        "reply_to_message_id": reply_to_message_id,
         "timestamp": timestamp_iso,
         "sender_id": message.from_user.id,
         "sender_fullname": message.from_user.full_name,
@@ -640,6 +701,71 @@ async def handle_business_message(message: types.Message):
         **{k: v for k, v in msg_data.items() if k != "file_id"}
     ))
     
-    # Логируем в Google Sheets
-    if storage_mgr:
-        await storage_mgr.add_message(msg_data)
+@router.edited_business_message()
+async def handle_business_message_edit(message: types.Message):
+    """Обработка редактирования сообщений (история изменений)."""
+    connection_id = message.business_connection_id
+    owner = await asyncio.to_thread(OwnersDB.get_by_connection_id, connection_id)
+    if not owner: return
+    
+    owner_id = owner["user_id"]
+    chat_id = message.chat.id
+    message_id = message.message_id
+    
+    # 1. Получаем текущее сообщение из БД
+    current_msg = await asyncio.to_thread(MessagesDB.get, owner_id, chat_id, message_id)
+    
+    # Если сообщения нет в базе (старое), обрабатываем как новое, но с пометкой?
+    # Лучше просто обработать как новое, чтобы оно появилось в базе
+    if not current_msg:
+        await handle_business_message(message)
+        return
+
+    # 2. Формируем запись истории
+    old_text = current_msg.get("message_text")
+    old_timestamp = current_msg.get("timestamp")
+    
+    # Если это просто обновление статуса (без изменения текста), пропускаем?
+    # Telegram присылает edited_message только при изменении контента
+    
+    edit_entry = {
+         # Если old_text None, значит текста не было
+        "message_text": old_text,
+        "timestamp": old_timestamp
+    }
+    
+    current_history = current_msg.get("edit_history") or []
+    # Если history хранит список, добавляем
+    if isinstance(current_history, list):
+        current_history.append(edit_entry)
+    else:
+        current_history = [edit_entry]
+    
+    # 3. Обновляем сообщение новыми данными
+    content_info = get_content_type(message)
+    message_datetime_utc = message.edit_date.replace(tzinfo=timezone.utc)
+    new_timestamp_iso = message_datetime_utc.isoformat()
+    
+    updates = {
+        "message_text": content_info["text"],
+        "timestamp": new_timestamp_iso,
+        "edit_history": current_history,
+        "content_type": content_info["content_type"],
+        "extra_data": content_info["extra_data"]
+    }
+    
+    await asyncio.to_thread(MessagesDB.update, owner_id=owner_id, chat_id=chat_id, message_id=message_id, **updates)
+    
+    # Обновляем кеш
+    new_msg_data = {**current_msg, **updates}
+    message_cache.set(owner_id, chat_id, message_id, new_msg_data)
+    
+    # Оповещение если нужно
+    if owner.get("notify_on_edit"):
+         # Формируем уведомление об изменении
+         notification_text = f"✏️ <b>ИЗМЕНЕНО</b>\n"
+         notification_text += f"Было: {escape(old_text or '[нет]')}\n"
+         notification_text += f"Стало: {escape(content_info['text'] or '[нет]')}"
+         # Можно отправить, но юзер просил "дизайн", это для админки.
+         # В телеграм можно отправить уведомление
+         pass

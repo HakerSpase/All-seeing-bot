@@ -46,7 +46,9 @@ class MessagesDB:
         message_text: Optional[str] = None,
         media_duration: Optional[int] = None,
         media_file_size: Optional[int] = None,
-        extra_data: Optional[str] = None
+        extra_data: Optional[str] = None,
+        reply_to_message_id: Optional[int] = None,
+        edit_history: Optional[List] = None
     ) -> Optional[Dict]:
         """
         Сохранить новое сообщение.
@@ -57,6 +59,8 @@ class MessagesDB:
                 "owner_id": owner_id,
                 "chat_id": chat_id,
                 "message_id": message_id,
+                "reply_to_message_id": reply_to_message_id,
+                "is_deleted": False, # По умолчанию false
                 "sender_id": sender_id,
                 "sender_fullname": sender_fullname,
                 "sender_username": sender_username,
@@ -90,18 +94,23 @@ class MessagesDB:
     def update(owner_id: int, chat_id: int, message_id: int, **kwargs) -> bool:
         """Обновить сообщение (например, новый текст после редактирования)."""
         try:
-            supabase.table(MessagesDB.table_name).update(kwargs).eq("owner_id", owner_id).eq("chat_id", chat_id).eq("message_id", message_id).execute()
+            result = supabase.table(MessagesDB.table_name).update(kwargs).eq("owner_id", owner_id).eq("chat_id", chat_id).eq("message_id", message_id).execute()
+            print(f"[DB UPDATE] msg_id={message_id}: updated with {list(kwargs.keys())}")
             return True
-        except Exception:
+        except Exception as e:
+            print(f"[DB UPDATE ERROR] msg_id={message_id}: {e}")
             return False
     
     @staticmethod
     def delete(owner_id: int, chat_id: int, message_id: int) -> bool:
-        """Удалить сообщение из базы (после обработки удаления)."""
+        """Пометить сообщение как удаленное (Soft Delete)."""
         try:
-            supabase.table(MessagesDB.table_name).delete().eq("owner_id", owner_id).eq("chat_id", chat_id).eq("message_id", message_id).execute()
+            # Не удаляем физически, а ставим is_deleted = True
+            result = supabase.table(MessagesDB.table_name).update({"is_deleted": True}).eq("owner_id", owner_id).eq("chat_id", chat_id).eq("message_id", message_id).execute()
+            print(f"[DB SOFT DELETE] msg_id={message_id}: marked as deleted")
             return True
-        except Exception:
+        except Exception as e:
+            print(f"[DB SOFT DELETE ERROR] msg_id={message_id}: {e}")
             return False
     
     @staticmethod

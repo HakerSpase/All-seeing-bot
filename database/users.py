@@ -23,7 +23,8 @@ class UsersDB:
             
     @staticmethod
     def add(user_id: int, owner_id: int, user_fullname: str, 
-            username: Optional[str] = None, is_premium: bool = False) -> Optional[Dict]:
+            username: Optional[str] = None, is_premium: bool = False,
+            avatar_file_id: Optional[str] = None) -> Optional[Dict]:
         """
         Зарегистрировать нового клиента для владельца.
         Клиент уникален в связке (user_id, owner_id).
@@ -34,7 +35,8 @@ class UsersDB:
                 "owner_id": owner_id,
                 "user_fullname": user_fullname,
                 "username": username,
-                "is_premium": is_premium
+                "is_premium": is_premium,
+                "avatar_file_id": avatar_file_id
             }, on_conflict="user_id,owner_id").execute()
             return response.data[0] if response.data else None
         except Exception as e:

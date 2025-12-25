@@ -6,13 +6,14 @@ import asyncio
 from datetime import datetime
 
 from aiogram import Router, types
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, WebAppInfo
 from aiogram.filters import Command
 from aiogram import F
 from typing import Optional
 
 import csv
 import io
+import os
 from config import lang, ADMIN_ID
 from database import OwnersDB, BackupsDB, MessagesDB, UsersDB
 from storage import StorageManager
@@ -284,4 +285,106 @@ async def users_export_command(message: types.Message):
         
     except Exception as e:
         await status_msg.edit_text(f"❌ Ошибка экспорта: {e}")
+
+
+@router.message(Command(commands=["panel"]))
+async def panel_command(message: types.Message):
+    """Открыть панель администратора (WebApp)."""
+    user_id = message.from_user.id
+    
+    # Проверка: доступно владельцам или админу
+    owner = await asyncio.to_thread(OwnersDB.get_by_user_id, user_id)
+    if not owner and user_id != ADMIN_ID:
+        await message.answer("⛔ Доступно только владельцам бизнес-подключения.")
+        return
+
+    # URL вашего веб-приложения (по умолчанию localhost для теста, если не задана переменная)
+    # ПОЛЬЗОВАТЕЛЬ, ЗАМЕНИ ЭТО НА СВОЙ VERCEL URL В .env (WEBAPP_URL)
+    web_app_url = os.getenv("WEBAPP_URL", "https://google.com") 
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📱 Открыть Панель", web_app=WebAppInfo(url=web_app_url))]
+    ])
+    
+    await message.answer(
+        "<b>📱 Панель Администратора</b>\n\n"
+        "Нажмите кнопку ниже, чтобы открыть панель управления.",
+        reply_markup=keyboard,
+        parse_mode='html'
+    )
+
+
+@router.message(Command(commands=["avatars"]))
+async def avatars_command(message: types.Message):
+    """
+    Команда обновления аватарок всех пользователей И владельцев (только для админа).
+    Загружает фото профилей из Telegram и сохраняет file_id в базу.
+    """
+    from database.supabase_client import supabase
+    
+    user_id = message.from_user.id
+    
+    if user_id != ADMIN_ID:
+        await message.answer("⛔ Эта команда доступна только администратору.", parse_mode='html')
+        return
+    
+    status_msg = await message.answer("🔄 <b>Обновление аватарок...</b>\n\nЗагружаю фото профилей...", parse_mode='html')
+    
+    try:
+        updated_users = 0
+        updated_owners = 0
+        errors = 0
+        
+        # 1. Обновляем аватарки ВЛАДЕЛЬЦЕВ
+        owners_response = supabase.table("owners").select("user_id, avatar_file_id").execute()
+        owners = owners_response.data or []
+        
+        for owner in owners:
+            uid = owner.get("user_id")
+            if owner.get("avatar_file_id"):
+                continue
+            try:
+                photos = await message.bot.get_user_profile_photos(uid, limit=1)
+                if photos.total_count > 0:
+                    avatar_file_id = photos.photos[0][0].file_id
+                    supabase.table("owners").update({"avatar_file_id": avatar_file_id}).eq("user_id", uid).execute()
+                    updated_owners += 1
+            except:
+                errors += 1
+            await asyncio.sleep(0.1)
+        
+        # 2. Обновляем аватарки КЛИЕНТОВ
+        users_response = supabase.table("users").select("user_id, owner_id, avatar_file_id").execute()
+        users = users_response.data or []
+        
+        for user in users:
+            uid = user.get("user_id")
+            oid = user.get("owner_id")
+            if user.get("avatar_file_id"):
+                continue
+            try:
+                photos = await message.bot.get_user_profile_photos(uid, limit=1)
+                if photos.total_count > 0:
+                    avatar_file_id = photos.photos[0][0].file_id
+                    await asyncio.to_thread(
+                        UsersDB.update, 
+                        user_id=uid, 
+                        owner_id=oid, 
+                        avatar_file_id=avatar_file_id
+                    )
+                    updated_users += 1
+            except:
+                errors += 1
+            await asyncio.sleep(0.1)
+        
+        await status_msg.edit_text(
+            f"<b>✅ Аватарки обновлены!</b>\n\n"
+            f"Владельцев: <code>{updated_owners}</code>\n"
+            f"Клиентов: <code>{updated_users}</code>\n"
+            f"Ошибок: <code>{errors}</code>",
+            parse_mode='html'
+        )
+        
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Ошибка: {e}")
 

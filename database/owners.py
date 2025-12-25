@@ -23,18 +23,21 @@ class OwnersDB:
 
     @staticmethod
     def add(user_id: int, business_connection_id: str, user_fullname: str, 
-            username: Optional[str] = None) -> Optional[Dict]:
+            username: Optional[str] = None, avatar_file_id: Optional[str] = None) -> Optional[Dict]:
         """
         Зарегистрировать нового владельца.
         Использует upsert для обновления при повторном подключении.
         """
         try:
-            response = supabase.table(OwnersDB.table_name).upsert({
+            data = {
                 "user_id": user_id,
                 "business_connection_id": business_connection_id,
                 "user_fullname": user_fullname,
                 "username": username
-            }, on_conflict="user_id").execute()
+            }
+            if avatar_file_id:
+                data["avatar_file_id"] = avatar_file_id
+            response = supabase.table(OwnersDB.table_name).upsert(data, on_conflict="user_id").execute()
             return response.data[0] if response.data else None
         except Exception as e:
             print(f"Ошибка добавления владельца: {e}")
